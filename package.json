@@ -1,6 +1,6 @@
 {
     "name": "sax-async",
-    "version": "0.0.0",
+    "version": "1.0.0",
     "description": "",
     "license": "ISC",
     "author": "Bruno Foggia",
@@ -11,7 +11,7 @@
         "prebuild": "rimraf lib",
         "build": "tsc -p ./tsconfig.build.json",
         "lint": "eslint \"{src,apps,libs}/**/*.+(js|json|ts|tsx)\" --fix",
-        "pre-commit": "lint-staged",
+        "pre-commit": "lint-staged && npm run test",
         "prepare": "npm run build",
         "test": "npm run test:run",
         "test:run": "NODE_OPTIONS=--experimental-vm-modules npx jest --verbose --detectOpenHandles"
