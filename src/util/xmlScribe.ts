@@ -41,6 +41,7 @@ export function cdata(text: string) {
 }
 
 const xml = {
+    declaration,
     open,
     attributes,
     close,
