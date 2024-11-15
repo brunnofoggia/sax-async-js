@@ -49,6 +49,7 @@ export enum SaxEventEnum {
 
 export interface SaxConstructorParams {
     strict: boolean;
+    ignoreDataEvents?: boolean;
     options: SAXOptions;
 }
 

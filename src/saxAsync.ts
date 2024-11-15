@@ -1,4 +1,4 @@
-import { isFunction, omit, size } from 'lodash';
+import { isFunction, omit, pick, size } from 'lodash';
 import { SAXStream } from 'sax';
 
 import Emittery from './util/emittery';
@@ -12,9 +12,13 @@ export class SaxAsync {
     private sax: SAXStream;
     private stream: NodeJS.ReadableStream;
 
+    stackOfEvents: SaxEvent[];
+    chunkNumber;
+
     constructor(strict = true, options: any = {}) {
-        this.saxParams = { strict, options: omit(options, 'stream') };
+        this.saxParams = { strict, options: omit(options, 'stream', 'ignoreDataEvents') };
         if (options.stream) this.setStream(options.stream);
+        this.saxParams.ignoreDataEvents = 'ignoreDataEvents' in options ? !!options.ignoreDataEvents : false;
     }
 
     getStream() {
@@ -49,10 +53,15 @@ export class SaxAsync {
         const eventEmitter = new Emittery();
         this.attachEventsTo(eventEmitter);
 
+        this.initializeSax();
+        // this.chunkNumber = 0;
+
         // Read stream chunks
-        for await (const saxesEvents of this.parse(readable) ?? []) {
+        for await (const saxesEvents of this.parse(readable, this.sax) ?? []) {
             // Process batch of events
-            for (const saxesEvent of saxesEvents ?? []) {
+            let saxesEvent;
+            while ((saxesEvent = saxesEvents.shift())) {
+                // for (const saxesEvent of saxesEvents ?? []) {
                 const args = saxesEvent.args?.length === 1 ? saxesEvent.args[0] : saxesEvent.args;
 
                 // Emit ordered events and process them in the event handlers strictly one-by-one
@@ -62,58 +71,68 @@ export class SaxAsync {
         }
     }
 
-    private async *parse(iterable: NodeJS.ReadableStream): AsyncGenerator<SaxEvent[], void, undefined> {
-        const saxParser = this.initializeSax();
-        let events = this.proxySaxEvents(saxParser);
+    dispatchErrors(errors) {
+        const err = new Err(errors[0].message, ERROR_CODE.PARSE_ERROR);
+        throw err;
+        // for (const x in errors) {
+        //     const error = errors[x];
+        //     console.error('error n.', x, 'message: ', error.message);
+        // }
+        // throw new Err('errors thrown while parsing', ERROR_CODE.PARSE_ERROR);
+    }
 
-        let error;
-        saxParser.on('error', (_error) => {
+    private async *parse(iterable: NodeJS.ReadableStream, saxParser: SAXStream): AsyncGenerator<SaxEvent[], void, undefined> {
+        const errors = [];
+        saxParser.on('error', (_error: any) => {
             // collect error to throw it later
-            error = new Err(error.message, error.code);
-            error.stack = _error.stack;
+            errors.push(pick(_error, ['message', 'code', 'stack']));
         });
 
         for await (const chunk of iterable) {
-            this.parseChunk(chunk, saxParser);
-            if (error) {
-                throw error;
+            this.stackOfEvents = [];
+            // this.chunkNumber++;
+
+            try {
+                this.parseChunk(chunk, saxParser);
+            } catch (_error) {
+                errors.push(pick(_error, ['message', 'code', 'stack']));
             }
 
-            yield events;
-            events = [];
+            if (errors.length) this.dispatchErrors(errors);
+            yield this.stackOfEvents;
         }
 
-        yield [
-            {
-                type: 'end',
-            },
-        ];
+        if (errors.length) this.dispatchErrors(errors);
+
+        this.stackOfEvents.push({
+            type: 'end',
+        });
+        yield this.stackOfEvents;
     }
 
-    private parseChunk(chunk, saxParser) {
+    private parseChunk(chunk, saxParser: SAXStream) {
         try {
             saxParser.write(chunk as string);
         } catch (error) {
-            throw new Err(error.message, ERROR_CODE.PARSE_ERROR);
+            throw new Err(error?.message, ERROR_CODE.PARSE_ERROR);
         }
     }
 
-    private proxySaxEvents(saxParser): SaxEvent[] {
+    private proxySaxEvents(saxParser: SAXStream) {
         // As a performance and error handling optimization, we gather all events instead of passing
         // them one by one, which would cause each event to go through the event queue
-        const events: SaxEvent[] = [];
+        this.stackOfEvents = [];
         for (const saxEvent in SaxEventEnum) {
             if (saxEvent === 'error') continue;
 
             saxParser.on(saxEvent, (...args) => {
-                events.push({
+                if (saxEvent === 'data' && this.saxParams.ignoreDataEvents) return;
+                this.stackOfEvents.push({
                     type: saxEvent as any,
                     args,
                 });
             });
         }
-
-        return events;
     }
 
     private async attachEventsTo(target) {
@@ -128,6 +147,9 @@ export class SaxAsync {
     }
 
     private initializeSax() {
-        return (this.sax = new SAXStream(this.saxParams.strict, this.saxParams.options));
+        this.sax = new SAXStream(this.saxParams.strict, this.saxParams.options);
+        this.proxySaxEvents(this.sax);
+
+        return this.sax;
     }
 }

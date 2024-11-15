@@ -69,9 +69,10 @@ describe('SaxAsync', () => {
             stream.push('chunk');
             stream.push(null);
             saxAsync.setStream(stream);
+            const sax = saxAsync['initializeSax']();
 
             try {
-                for await (const events of saxAsync['parse'](stream)) {
+                for await (const events of saxAsync['parse'](stream, sax)) {
                     break;
                 }
             } catch (error) {
@@ -89,17 +90,23 @@ describe('SaxAsync', () => {
             stream.push(null);
             saxAsync.setStream(stream);
 
-            for await (const events of saxAsync['parse'](stream)) {
-                expect(events[0]['type']).toEqual('opentag');
-                expect(events[0]['args'][0]).toEqual({
+            const sax = saxAsync['initializeSax']();
+
+            for await (const saxesEvents of saxAsync['parse'](stream, sax)) {
+                const event0 = saxesEvents[0] || {};
+                const event1 = saxesEvents[1] || {};
+                const event2 = saxesEvents[2] || {};
+
+                expect(event0['type']).toEqual('opentag');
+                expect(event0['args'][0]).toEqual({
                     name: 'test',
                     isSelfClosing: true,
                     attributes: {},
                 });
-                expect(events[1]['type']).toEqual('closetag');
-                expect(events[1]['args'][0]).toEqual('test');
-                expect(events[2]['type']).toEqual('data');
-                expect(events[2]['args'][0]).toEqual(tag);
+                expect(event1['type']).toEqual('closetag');
+                expect(event1['args'][0]).toEqual('test');
+                expect(event2['type']).toEqual('data');
+                expect(event2['args'][0]).toEqual(tag);
                 break;
             }
         });
